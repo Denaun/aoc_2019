@@ -4,14 +4,14 @@ from typing import List
 
 import click
 
-from day_1.day_1 import fuel_requirement
+from day_1.day_1 import full_fuel_requirement
 
 
 @click.command()
 @click.argument('mass', nargs=-1, type=int)
 def main(mass: List[int]) -> int:
     """Console script for day_1."""
-    click.echo(sum(fuel_requirement(m) for m in mass))
+    click.echo(sum(full_fuel_requirement(m) for m in mass))
     return 0
 
 
