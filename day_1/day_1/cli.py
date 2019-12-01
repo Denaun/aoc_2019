@@ -1,14 +1,17 @@
 """Console script for day_1."""
 import sys
+from typing import List
+
 import click
+
+from day_1.day_1 import fuel_requirement
 
 
 @click.command()
-def main(args=None):
+@click.argument('mass', nargs=-1, type=int)
+def main(mass: List[int]) -> int:
     """Console script for day_1."""
-    click.echo("Replace this message by putting your code into "
-               "day_1.cli.main")
-    click.echo("See click documentation at https://click.palletsprojects.com/")
+    click.echo(sum(fuel_requirement(m) for m in mass))
     return 0
 
 
