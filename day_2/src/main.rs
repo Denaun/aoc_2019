@@ -23,9 +23,17 @@ fn main() {
         .map(|x| x.parse())
         .collect::<Result<_, _>>()
         .unwrap();
-    intcode[1] = 12;
-    intcode[2] = 02;
-    let mut computer = Computer::new(intcode);
-    computer.run();
-    println!("{}", computer.intcode[0]);
+    for noun in (0..intcode.len()).filter(|x| x % 4 != 0) {
+        intcode[1] = noun;
+        for verb in (0..intcode.len()).filter(|x| x % 4 != 0) {
+            intcode[2] = verb;
+            let mut computer = Computer::new(intcode.clone());
+            computer.run();
+            if computer.intcode[0] == 19690720 {
+                println!("{}", 100 * noun + verb);
+                return;
+            }
+        }
+    }
+    std::unreachable!();
 }

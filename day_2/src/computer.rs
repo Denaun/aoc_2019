@@ -44,14 +44,14 @@ impl Computer {
 }
 
 #[derive(PartialEq)]
-enum Op {
+pub enum Op {
     ADD,
     MUL,
     STOP,
 }
 
 impl Op {
-    fn operands(&self) -> usize {
+    pub fn operands(&self) -> usize {
         match self {
             Op::ADD => 3,
             Op::MUL => 3,
@@ -106,5 +106,23 @@ mod tests {
         let mut computer = Computer::new(vec![1, 1, 1, 4, 99, 5, 6, 0, 99]);
         computer.run();
         assert_eq!(computer.intcode, vec![30, 1, 1, 4, 2, 5, 6, 0, 99]);
+    }
+
+    #[test]
+    fn test_part_1() {
+        // Solution for part 1.
+        let mut intcode: Vec<usize> = include_str!("input")
+            .lines()
+            .next()
+            .unwrap()
+            .split(",")
+            .map(|x| x.parse())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        intcode[1] = 15;
+        intcode[2] = 03;
+        let mut computer = Computer::new(intcode);
+        computer.run();
+        assert_eq!(computer.intcode[0], 9581917);
     }
 }
