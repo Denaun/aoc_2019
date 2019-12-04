@@ -36,7 +36,7 @@ module Day3
     end
   end
 
-  def self.parse(str)
+  def self.parse_segment(str)
     segment = OpenStruct.new
     segment.direction = case str[0]
                         when 'R'
@@ -52,6 +52,10 @@ module Day3
     end
     segment.length = str[1..-1].to_i
     segment
+  end
+
+  def self.parse_wire(str)
+    str.split(',').collect { |x| parse_segment(x) }
   end
 
   def self.to_points(segments)
@@ -71,12 +75,22 @@ module Day3
         end
       start = points.last
     end
-    points.to_set
+    points
   end
 
-  def self.solve(wire1, wire2)
-    (to_points(wire1.split(',').collect { |x| parse(x) }) &
-     to_points(wire2.split(',').collect { |x| parse(x) }))
-      .collect(&:manhattan_length).to_a.min
+  def self.solve1(wire1, wire2)
+    (to_points(parse_wire wire1) & to_points(parse_wire wire2))
+      .collect(&:manhattan_length)
+      .to_a
+      .min
+  end
+
+  def self.solve2(wire1, wire2)
+    points1 = Hash[to_points(parse_wire wire1).zip (1..)]
+    points2 = Hash[to_points(parse_wire wire2).zip (1..)]
+    (points1.keys & points2.keys)
+      .collect { |pt| points1[pt] + points2[pt] }
+      .to_a
+      .min
   end
 end
