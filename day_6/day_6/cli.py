@@ -12,7 +12,10 @@ from day_6.day_6 import parse_map
 @click.argument('orbit', nargs=-1)
 def main(orbit=List[int]):
     """Console script for day_6."""
-    click.echo(sum(parse_map(orbit).total_orbits().values()))
+    if orbit:
+        click.echo(len(parse_map(orbit).shortest_path('YOU', 'SAN')) - 1)
+    else:
+        click.echo('At least one orbit required.')
     return 0
 
 
