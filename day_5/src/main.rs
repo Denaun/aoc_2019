@@ -27,7 +27,7 @@ fn main() {
         .map(|x| x.parse())
         .collect::<Result<_, _>>()
         .unwrap();
-    let mut computer = Computer::new(
+    Computer::new(
         intcode,
         || {
             let mut buffer = String::new();
@@ -35,6 +35,7 @@ fn main() {
             buffer.parse().unwrap()
         },
         |v| println!("{}", v),
-    );
-    computer.run().unwrap();
+    )
+    .run()
+    .unwrap();
 }
