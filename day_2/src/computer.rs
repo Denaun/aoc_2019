@@ -76,6 +76,21 @@ impl TryFrom<usize> for Op {
     }
 }
 
+pub fn find_noun_verb(mut intcode: Vec<usize>, result: usize) -> Option<(usize, usize)> {
+    for noun in (0..intcode.len()).filter(|x| x % 4 != 0) {
+        intcode[1] = noun;
+        for verb in (0..intcode.len()).filter(|x| x % 4 != 0) {
+            intcode[2] = verb;
+            let mut computer = Computer::new(intcode.clone());
+            computer.run();
+            if computer.intcode[0] == result {
+                return Some((noun, verb));
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,10 +134,26 @@ mod tests {
             .map(|x| x.parse())
             .collect::<Result<_, _>>()
             .unwrap();
-        intcode[1] = 15;
-        intcode[2] = 03;
+        intcode[1] = 12;
+        intcode[2] = 02;
         let mut computer = Computer::new(intcode);
         computer.run();
         assert_eq!(computer.intcode[0], 9581917);
+    }
+
+    #[test]
+    fn test_part_2() {
+        // Solution for part 2.
+        let intcode: Vec<usize> = include_str!("input")
+            .lines()
+            .next()
+            .unwrap()
+            .split(",")
+            .map(|x| x.parse())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let (noun, verb) = find_noun_verb(intcode, 19690720).unwrap();
+        assert_eq!(noun, 25);
+        assert_eq!(verb, 05);
     }
 }
