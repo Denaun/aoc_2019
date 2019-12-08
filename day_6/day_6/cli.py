@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
-
 """Console script for day_6."""
 import sys
+from typing import List
+
 import click
+
+from day_6.day_6 import parse_map
 
 
 @click.command()
-def main(args=None):
+@click.argument('orbit', nargs=-1)
+def main(orbit=List[int]):
     """Console script for day_6."""
-    click.echo("Replace this message by putting your code into "
-               "day_6.cli.main")
-    click.echo("See click documentation at http://click.pocoo.org/")
+    click.echo(sum(parse_map(orbit).total_orbits().values()))
     return 0
 
 
