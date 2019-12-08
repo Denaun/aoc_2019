@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 clap = "^2.33"
+env_logger = "0.7"
+log = "0.4"
+snafu = "0.6"
