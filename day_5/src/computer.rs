@@ -1,4 +1,4 @@
-use log::{debug, info};
+use log::debug;
 use snafu::{ensure, ResultExt, Snafu};
 use std::convert::TryFrom;
 
