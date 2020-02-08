@@ -1,7 +1,6 @@
 use day_5::computer::Computer;
 use log::debug;
 use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 
 pub fn find_largest_output<Phases>(
@@ -14,6 +13,8 @@ where
     phase_settings
         .map(|phases| {
             debug!("Checking phases {:?}", phases);
+            let intcode = intcode.clone();
+
             let (txs, rxs): (Vec<_>, Vec<_>) = phases
                 .iter()
                 .map(|code| {
@@ -23,18 +24,16 @@ where
                 })
                 .unzip();
             txs.first().unwrap().send(0).unwrap(); // Initial input.
-
             let (signal_tx, signal_rx) = mpsc::channel();
-            let computers: Vec<_> = rxs
-                .into_iter()
+
+            rayon::scope(move |s| {
                 // Use the next channel to transmit.
-                .zip(txs.into_iter().cycle().skip(1))
-                .map(|(rx, tx)| {
+                for (rx, tx) in rxs.into_iter().zip(txs.into_iter().cycle().skip(1)) {
                     let intcode = intcode.clone();
                     let signal_tx = signal_tx.clone();
-                    thread::spawn(move || {
+                    s.spawn(move |_| {
                         Computer::new(
-                            intcode.clone(),
+                            intcode,
                             || {
                                 debug!("Receiving");
                                 let v = rx.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -50,12 +49,8 @@ where
                         .run()
                         .unwrap();
                     })
-                })
-                .collect();
-            drop(signal_tx); // Ensure the channel is owned by the computers.
-            for c in computers {
-                c.join().unwrap();
-            }
+                }
+            });
 
             let signal = signal_rx.iter().last().expect("No output");
             debug!("Resulting signal: {}", signal);
@@ -70,6 +65,7 @@ mod tests {
     use super::*;
     use permutator::Permutation;
     use std::io::Write;
+    use std::thread;
 
     fn _init() {
         let _ = env_logger::builder()
