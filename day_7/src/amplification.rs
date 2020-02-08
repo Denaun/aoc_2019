@@ -1,5 +1,8 @@
 use day_5::computer::Computer;
 use log::debug;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 pub fn find_largest_output<Phases>(
     intcode: Vec<isize>,
@@ -11,22 +14,50 @@ where
     phase_settings
         .map(|phases| {
             debug!("Checking phases {:?}", phases);
-            let signal = phases.iter().fold(0, |signal, code| {
-                // Inputs in reverse order since they are popped.
-                let mut inputs = vec![signal, *code];
-                let mut signal = None;
-                Computer::new(
-                    intcode.clone(),
-                    || inputs.pop().expect("More than 2 inputs."),
-                    |v| {
-                        assert!(signal.is_none(), "More than 1 output.");
-                        signal = Some(v)
-                    },
-                )
-                .run()
-                .unwrap();
-                signal.expect("No output.")
-            });
+            let (txs, rxs): (Vec<_>, Vec<_>) = phases
+                .iter()
+                .map(|code| {
+                    let (tx, rx) = mpsc::channel();
+                    tx.send(*code).unwrap();
+                    (tx, rx)
+                })
+                .unzip();
+            txs.first().unwrap().send(0).unwrap(); // Initial input.
+
+            let (signal_tx, signal_rx) = mpsc::channel();
+            let computers: Vec<_> = rxs
+                .into_iter()
+                // Use the next channel to transmit.
+                .zip(txs.into_iter().cycle().skip(1))
+                .map(|(rx, tx)| {
+                    let intcode = intcode.clone();
+                    let signal_tx = signal_tx.clone();
+                    thread::spawn(move || {
+                        Computer::new(
+                            intcode.clone(),
+                            || {
+                                debug!("Receiving");
+                                let v = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+                                debug!("Received {}", v);
+                                v
+                            },
+                            |v| {
+                                debug!("Sending {}", v);
+                                let _ = tx.send(v);
+                                signal_tx.send(v).unwrap();
+                            },
+                        )
+                        .run()
+                        .unwrap();
+                    })
+                })
+                .collect();
+            drop(signal_tx); // Ensure the channel is owned by the computers.
+            for c in computers {
+                c.join().unwrap();
+            }
+
+            let signal = signal_rx.iter().last().expect("No output");
             debug!("Resulting signal: {}", signal);
             (phases, signal)
         })
@@ -38,9 +69,17 @@ where
 mod tests {
     use super::*;
     use permutator::Permutation;
+    use std::io::Write;
+
+    fn _init() {
+        let _ = env_logger::builder()
+            .format(|buf, record| writeln!(buf, "{:?}: {}", thread::current().id(), record.args()))
+            .try_init();
+    }
 
     #[test]
     fn test_example1() {
+        _init();
         let (phases, signal) = find_largest_output(
             vec![
                 3, 15, 3, 16, 1002, 16, 10, 16, 1, 16, 15, 15, 4, 15, 99, 0, 0,
@@ -91,5 +130,48 @@ mod tests {
         let (_phases, signal) =
             find_largest_output(intcode, (0..=4).collect::<Vec<isize>>().permutation());
         assert_eq!(signal, 20413);
+    }
+
+    #[test]
+    fn test_example4() {
+        let (phases, signal) = find_largest_output(
+            vec![
+                3, 26, 1001, 26, -4, 26, 3, 27, 1002, 27, 2, 27, 1, 27, 26, 27, 4, 27, 1001, 28,
+                -1, 28, 1005, 28, 6, 99, 0, 0, 5,
+            ],
+            (5..=9).collect::<Vec<isize>>().permutation(),
+        );
+        assert_eq!(phases, vec![9, 8, 7, 6, 5]);
+        assert_eq!(signal, 139629729);
+    }
+
+    #[test]
+    fn test_example5() {
+        let (phases, signal) = find_largest_output(
+            vec![
+                3, 52, 1001, 52, -5, 52, 3, 53, 1, 52, 56, 54, 1007, 54, 5, 55, 1005, 55, 26, 1001,
+                54, -5, 54, 1105, 1, 12, 1, 53, 54, 53, 1008, 54, 0, 55, 1001, 55, 1, 55, 2, 53,
+                55, 53, 4, 53, 1001, 56, -1, 56, 1005, 56, 6, 99, 0, 0, 0, 0, 10,
+            ],
+            (5..=9).collect::<Vec<isize>>().permutation(),
+        );
+        assert_eq!(phases, vec![9, 7, 8, 5, 6]);
+        assert_eq!(signal, 18216);
+    }
+
+    #[test]
+    fn test_day_7_part_2() {
+        // Solution for day 7 part 1.
+        let intcode: Vec<isize> = include_str!("input")
+            .lines()
+            .next()
+            .unwrap()
+            .split(",")
+            .map(|x| x.parse())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let (_phases, signal) =
+            find_largest_output(intcode, (5..=9).collect::<Vec<isize>>().permutation());
+        assert_eq!(signal, 3321777);
     }
 }
