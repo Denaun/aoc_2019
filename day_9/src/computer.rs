@@ -732,4 +732,30 @@ mod tests {
         .unwrap();
         assert_eq!(output, vec![3601950151]);
     }
+
+    #[test]
+    fn day_9_part_2() {
+        // Solution for day 9 part 2.
+        let intcode: Vec<isize> = include_str!("input_day_9")
+            .lines()
+            .next()
+            .unwrap()
+            .split(",")
+            .map(|x| x.parse())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let mut input = vec![2];
+        let mut output = vec![];
+        Computer::new(
+            intcode,
+            || input.pop().unwrap(),
+            |v| {
+                info!("Write {}", v);
+                output.push(v)
+            },
+        )
+        .run()
+        .unwrap();
+        assert_eq!(output, vec![64236]);
+    }
 }
