@@ -1,5 +1,7 @@
 use log::debug;
 use snafu::{ensure, ResultExt, Snafu};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 
 pub struct Computer<R, W>
@@ -11,6 +13,8 @@ where
     pub read: R,
     pub write: W,
     ip: usize,
+    rb: isize,
+    vmem: RefCell<HashMap<usize, isize>>,
 }
 
 #[derive(Debug, Snafu)]
@@ -50,6 +54,8 @@ where
             read,
             write,
             ip: 0,
+            rb: 0,
+            vmem: RefCell::new(HashMap::new()),
         }
     }
 
@@ -71,17 +77,17 @@ where
     fn execute(&mut self, instr: &Instruction) -> Result<bool> {
         debug!("Execute {:?}", instr);
         match instr {
-            Instruction::Add(mode1, mode2) => {
-                self.store(3, self.load(1, mode1)? + self.load(2, mode2)?)?;
+            Instruction::Add(mode1, mode2, mode3) => {
+                self.store(3, self.load(1, mode1)? + self.load(2, mode2)?, mode3)?;
                 Ok(true)
             }
-            Instruction::Mul(mode1, mode2) => {
-                self.store(3, self.load(1, mode1)? * self.load(2, mode2)?)?;
+            Instruction::Mul(mode1, mode2, mode3) => {
+                self.store(3, self.load(1, mode1)? * self.load(2, mode2)?, mode3)?;
                 Ok(true)
             }
-            Instruction::Input => {
+            Instruction::Input(mode) => {
                 let value = (self.read)();
-                self.store(1, value)?;
+                self.store(1, value, mode)?;
                 Ok(true)
             }
             Instruction::Output(mode) => {
@@ -105,7 +111,7 @@ where
                     Ok(true)
                 }
             }
-            Instruction::LessThan(mode1, mode2) => {
+            Instruction::LessThan(mode1, mode2, mode3) => {
                 self.store(
                     3,
                     if self.load(1, mode1)? < self.load(2, mode2)? {
@@ -113,10 +119,11 @@ where
                     } else {
                         0
                     },
+                    mode3,
                 )?;
                 Ok(true)
             }
-            Instruction::Equals(mode1, mode2) => {
+            Instruction::Equals(mode1, mode2, mode3) => {
                 self.store(
                     3,
                     if self.load(1, mode1)? == self.load(2, mode2)? {
@@ -124,10 +131,15 @@ where
                     } else {
                         0
                     },
+                    mode3,
                 )?;
                 Ok(true)
             }
-            _ => std::unreachable!(),
+            Instruction::RelativeBase(mode) => {
+                self.rb += self.load(1, mode)?;
+                Ok(true)
+            }
+            Instruction::Stop => std::unreachable!(),
         }
     }
 
@@ -145,27 +157,47 @@ where
 
     fn load(&self, offset: usize, mode: &Mode) -> Result<isize> {
         let address = self.ip + offset;
-        debug!("Load {} ({:?} -> {})", address, mode, self.intcode[address]);
-        let result = match mode {
-            Mode::Position => {
-                let destination =
-                    usize::try_from(self.intcode[address]).context(Address { address })?;
-                debug!("Load from {}", destination);
-                self.intcode[destination]
-            }
-            Mode::Immediate => self.intcode[address],
-        };
-        debug!("Loaded {}", result);
-        Ok(result)
+        let address = self.try_resolve(address, mode)?.unwrap_or(address);
+        let value = self.get_mem(address);
+        debug!("Loaded {} from {}", value, address);
+        Ok(value)
     }
 
-    fn store(&mut self, offset: usize, value: isize) -> Result<()> {
+    fn store(&mut self, offset: usize, value: isize, mode: &Mode) -> Result<()> {
         let address = self.ip + offset;
-        debug!("Store {} to {}", value, address);
-        let destination = usize::try_from(self.intcode[address]).context(Address { address })?;
-        debug!("Store in {}", destination);
-        self.intcode[destination] = value;
+        let address = self.try_resolve(address, mode)?.unwrap();
+        debug!("Store {} in {}", value, address);
+        *self.get_mem_mut(address) = value;
         Ok(())
+    }
+
+    fn try_resolve(&self, address: usize, mode: &Mode) -> Result<Option<usize>> {
+        debug!("Resolve {} ({:?})", address, mode);
+        let base = match mode {
+            Mode::Position => 0,
+            Mode::Immediate => return Ok(None),
+            Mode::Relative => self.rb,
+        };
+        let offset = self.get_mem(address);
+        let address = usize::try_from(base + offset).context(Address { address })?;
+        debug!("Base {}, offset {} => {}", base, offset, address);
+        Ok(Some(address))
+    }
+
+    fn get_mem(&self, address: usize) -> isize {
+        if let Some(result) = self.intcode.get(address) {
+            *result
+        } else {
+            *self.vmem.borrow_mut().entry(address).or_insert(0)
+        }
+    }
+
+    fn get_mem_mut(&mut self, address: usize) -> &mut isize {
+        if let Some(result) = self.intcode.get_mut(address) {
+            result
+        } else {
+            self.vmem.get_mut().entry(address).or_insert(0)
+        }
     }
 }
 
@@ -183,42 +215,45 @@ fn digits(value: usize) -> Vec<u32> {
 
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
-    Add(Mode, Mode),
-    Mul(Mode, Mode),
-    Input,
+    Add(Mode, Mode, Mode),
+    Mul(Mode, Mode, Mode),
+    Input(Mode),
     Output(Mode),
     JumpIfTrue(Mode, Mode),
     JumpIfFalse(Mode, Mode),
-    LessThan(Mode, Mode),
-    Equals(Mode, Mode),
+    LessThan(Mode, Mode, Mode),
+    Equals(Mode, Mode, Mode),
+    RelativeBase(Mode),
     Stop,
 }
 
 impl Instruction {
     pub fn inputs(&self) -> usize {
         match self {
-            Instruction::Add(_, _) => 2,
-            Instruction::Mul(_, _) => 2,
-            Instruction::Input => 0,
+            Instruction::Add(_, _, _) => 2,
+            Instruction::Mul(_, _, _) => 2,
+            Instruction::Input(_) => 0,
             Instruction::Output(_) => 1,
             Instruction::JumpIfTrue(_, _) => 2,
             Instruction::JumpIfFalse(_, _) => 2,
-            Instruction::LessThan(_, _) => 2,
-            Instruction::Equals(_, _) => 2,
+            Instruction::LessThan(_, _, _) => 2,
+            Instruction::Equals(_, _, _) => 2,
+            Instruction::RelativeBase(_) => 1,
             Instruction::Stop => 0,
         }
     }
 
     pub fn outputs(&self) -> usize {
         match self {
-            Instruction::Add(_, _) => 1,
-            Instruction::Mul(_, _) => 1,
-            Instruction::Input => 1,
+            Instruction::Add(_, _, _) => 1,
+            Instruction::Mul(_, _, _) => 1,
+            Instruction::Input(_) => 1,
             Instruction::Output(_) => 0,
             Instruction::JumpIfTrue(_, _) => 0,
             Instruction::JumpIfFalse(_, _) => 0,
-            Instruction::LessThan(_, _) => 1,
-            Instruction::Equals(_, _) => 1,
+            Instruction::LessThan(_, _, _) => 1,
+            Instruction::Equals(_, _, _) => 1,
+            Instruction::RelativeBase(_) => 0,
             Instruction::Stop => 0,
         }
     }
@@ -242,19 +277,20 @@ impl TryFrom<usize> for Instruction {
                 .unwrap_or(Ok(Mode::Position))
         };
         let instr = match opcode {
-            1 => Ok(Instruction::Add(mode(0)?, mode(1)?)),
-            2 => Ok(Instruction::Mul(mode(0)?, mode(1)?)),
-            3 => Ok(Instruction::Input),
+            1 => Ok(Instruction::Add(mode(0)?, mode(1)?, mode(2)?)),
+            2 => Ok(Instruction::Mul(mode(0)?, mode(1)?, mode(2)?)),
+            3 => Ok(Instruction::Input(mode(0)?)),
             4 => Ok(Instruction::Output(mode(0)?)),
             5 => Ok(Instruction::JumpIfTrue(mode(0)?, mode(1)?)),
             6 => Ok(Instruction::JumpIfFalse(mode(0)?, mode(1)?)),
-            7 => Ok(Instruction::LessThan(mode(0)?, mode(1)?)),
-            8 => Ok(Instruction::Equals(mode(0)?, mode(1)?)),
+            7 => Ok(Instruction::LessThan(mode(0)?, mode(1)?, mode(2)?)),
+            8 => Ok(Instruction::Equals(mode(0)?, mode(1)?, mode(2)?)),
+            9 => Ok(Instruction::RelativeBase(mode(0)?)),
             99 => Ok(Instruction::Stop),
             _ => Err(Error::OpCodeInvalid { value }),
         }?;
         ensure!(
-            digits.len() <= instr.inputs(),
+            digits.len() <= instr.operands(),
             AdditionalDigits { instr, digits }
         );
         Ok(instr)
@@ -265,6 +301,7 @@ impl TryFrom<usize> for Instruction {
 pub enum Mode {
     Position,
     Immediate,
+    Relative,
 }
 
 impl TryFrom<u32> for Mode {
@@ -274,6 +311,7 @@ impl TryFrom<u32> for Mode {
         match digit {
             0 => Ok(Mode::Position),
             1 => Ok(Mode::Immediate),
+            2 => Ok(Mode::Relative),
             _ => Err(Error::ModeInvalid { digit }),
         }
     }
@@ -281,6 +319,8 @@ impl TryFrom<u32> for Mode {
 
 #[cfg(test)]
 mod tests {
+    use log::info;
+
     pub fn find_noun_verb(mut intcode: Vec<isize>, result: isize) -> Option<(usize, usize)> {
         for noun in (0..intcode.len()).filter(|x| x % 4 != 0) {
             intcode[1] = noun as isize;
@@ -303,7 +343,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_example1() {
+    fn example1() {
         let mut computer = Computer::new(
             vec![1, 0, 0, 0, 99],
             || std::unreachable!(),
@@ -314,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example2() {
+    fn example2() {
         let mut computer = Computer::new(
             vec![2, 3, 0, 3, 99],
             || std::unreachable!(),
@@ -325,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example3() {
+    fn example3() {
         let mut computer = Computer::new(
             vec![2, 4, 4, 5, 99, 0],
             || std::unreachable!(),
@@ -336,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example4() {
+    fn example4() {
         let mut computer = Computer::new(
             vec![1, 1, 1, 4, 99, 5, 6, 0, 99],
             || std::unreachable!(),
@@ -347,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn test_day_2_part_1() {
+    fn day_2_part_1() {
         // Solution for day 2 part 1.
         let mut intcode: Vec<isize> = include_str!("input_day_2")
             .lines()
@@ -365,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn test_day_2_part_2() {
+    fn day_2_part_2() {
         // Solution for day 2 part 2.
         let intcode: Vec<isize> = include_str!("input_day_2")
             .lines()
@@ -381,16 +421,19 @@ mod tests {
     }
 
     #[test]
-    fn test_op_codes() -> Result<(), Error> {
+    fn op_codes() -> Result<(), Error> {
         assert_eq!(
             Instruction::try_from(1)?,
-            Instruction::Add(Mode::Position, Mode::Position)
+            Instruction::Add(Mode::Position, Mode::Position, Mode::Position)
         );
         assert_eq!(
             Instruction::try_from(2)?,
-            Instruction::Mul(Mode::Position, Mode::Position)
+            Instruction::Mul(Mode::Position, Mode::Position, Mode::Position)
         );
-        assert_eq!(Instruction::try_from(3)?, Instruction::Input);
+        assert_eq!(
+            Instruction::try_from(3)?,
+            Instruction::Input(Mode::Position)
+        );
         assert_eq!(
             Instruction::try_from(4)?,
             Instruction::Output(Mode::Position)
@@ -405,29 +448,33 @@ mod tests {
         );
         assert_eq!(
             Instruction::try_from(7)?,
-            Instruction::LessThan(Mode::Position, Mode::Position)
+            Instruction::LessThan(Mode::Position, Mode::Position, Mode::Position)
         );
         assert_eq!(
             Instruction::try_from(8)?,
-            Instruction::Equals(Mode::Position, Mode::Position)
+            Instruction::Equals(Mode::Position, Mode::Position, Mode::Position)
+        );
+        assert_eq!(
+            Instruction::try_from(9)?,
+            Instruction::RelativeBase(Mode::Position)
         );
         assert_eq!(Instruction::try_from(99)?, Instruction::Stop);
         Ok(())
     }
 
     #[test]
-    fn test_modes() -> Result<(), Error> {
+    fn modes() -> Result<(), Error> {
         assert_eq!(
-            Instruction::try_from(1101)?,
-            Instruction::Add(Mode::Immediate, Mode::Immediate)
+            Instruction::try_from(21101)?,
+            Instruction::Add(Mode::Immediate, Mode::Immediate, Mode::Relative)
         );
         assert_eq!(
             Instruction::try_from(1001)?,
-            Instruction::Add(Mode::Position, Mode::Immediate)
+            Instruction::Add(Mode::Position, Mode::Immediate, Mode::Position)
         );
         assert_eq!(
             Instruction::try_from(102)?,
-            Instruction::Mul(Mode::Immediate, Mode::Position)
+            Instruction::Mul(Mode::Immediate, Mode::Position, Mode::Position)
         );
         assert_eq!(
             Instruction::try_from(104)?,
@@ -443,17 +490,21 @@ mod tests {
         );
         assert_eq!(
             Instruction::try_from(1107)?,
-            Instruction::LessThan(Mode::Immediate, Mode::Immediate)
+            Instruction::LessThan(Mode::Immediate, Mode::Immediate, Mode::Position)
         );
         assert_eq!(
             Instruction::try_from(1108)?,
-            Instruction::Equals(Mode::Immediate, Mode::Immediate)
+            Instruction::Equals(Mode::Immediate, Mode::Immediate, Mode::Position)
+        );
+        assert_eq!(
+            Instruction::try_from(209)?,
+            Instruction::RelativeBase(Mode::Relative)
         );
         Ok(())
     }
 
     #[test]
-    fn test_example5() {
+    fn example5() {
         for input in 0..10 {
             let mut output = 0;
             Computer::new(
@@ -468,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example6() {
+    fn example6() {
         for input in 0..10 {
             let mut output = 0;
             Computer::new(
@@ -483,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example7() {
+    fn example7() {
         for input in 0..10 {
             let mut output = 0;
             Computer::new(
@@ -498,7 +549,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example8() {
+    fn example8() {
         for input in 0..10 {
             let mut output = 0;
             Computer::new(
@@ -513,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example9() {
+    fn example9() {
         for input in 0..10 {
             let mut output = 0;
             Computer::new(
@@ -528,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example10() {
+    fn example10() {
         for input in 0..10 {
             let mut output = 0;
             Computer::new(
@@ -543,8 +594,7 @@ mod tests {
     }
 
     #[test]
-    fn test_example11() {
-        env_logger::init();
+    fn example11() {
         for input in 0..10 {
             debug!("Input {}", input);
             let mut output = 0;
@@ -573,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn test_day_5_part_1() {
+    fn day_5_part_1() {
         // Solution for day 5 part 1.
         let intcode: Vec<isize> = include_str!("input_day_5")
             .lines()
@@ -599,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn test_day_5_part_2() {
+    fn day_5_part_2() {
         // Solution for day 5 part 1.
         let intcode: Vec<isize> = include_str!("input_day_5")
             .lines()
@@ -622,5 +672,64 @@ mod tests {
         .run()
         .unwrap();
         assert_eq!(output, vec![3892695]);
+    }
+
+    #[test]
+    fn example12() {
+        let intcode = vec![
+            109, 1, 204, -1, 1001, 100, 1, 100, 1008, 100, 16, 101, 1006, 101, 0, 99,
+        ];
+        let mut output = Vec::with_capacity(intcode.len());
+        Computer::new(intcode.clone(), || panic!("No output"), |v| output.push(v))
+            .run()
+            .unwrap();
+        assert_eq!(output, intcode);
+    }
+
+    #[test]
+    fn example13() {
+        let intcode = vec![1102, 34915192, 34915192, 7, 4, 7, 99, 0];
+        let mut output = 0;
+        Computer::new(intcode.clone(), || panic!("No output"), |v| output = v)
+            .run()
+            .unwrap();
+        assert!(output > (1e15 as isize));
+        assert!(output < (1e16 as isize));
+    }
+
+    #[test]
+    fn example14() {
+        let intcode = vec![104, 1125899906842624, 99];
+        let mut output = 0;
+        Computer::new(intcode.clone(), || panic!("No output"), |v| output = v)
+            .run()
+            .unwrap();
+        assert_eq!(output, intcode[1]);
+    }
+
+    #[test]
+    fn day_9_part_1() {
+        // Solution for day 9 part 1.
+        let intcode: Vec<isize> = include_str!("input_day_9")
+            .lines()
+            .next()
+            .unwrap()
+            .split(",")
+            .map(|x| x.parse())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let mut input = vec![1];
+        let mut output = vec![];
+        Computer::new(
+            intcode,
+            || input.pop().unwrap(),
+            |v| {
+                info!("Write {}", v);
+                output.push(v)
+            },
+        )
+        .run()
+        .unwrap();
+        assert_eq!(output, vec![3601950151]);
     }
 }
