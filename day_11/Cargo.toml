@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 day_9 = { path = "../day_9" }
 snafu = "^0.6.2"
+itertools = "^0.8.2"

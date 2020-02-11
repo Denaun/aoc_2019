@@ -1,6 +1,7 @@
 extern crate day_9;
 
 use day_9::computer::Computer;
+use itertools::Itertools;
 use snafu::Snafu;
 use std::cell::RefCell;
 use std::collections::hash_set::HashSet;
@@ -84,11 +85,16 @@ pub struct PaintingRobot {
 }
 
 impl PaintingRobot {
-    pub fn new() -> Self {
+    pub fn new(starting_color: Color) -> Self {
+        let position = Point { x: 0, y: 0 };
+        let whites = match starting_color {
+            Color::Black => HashSet::new(),
+            Color::White => [position].iter().cloned().collect(),
+        };
         PaintingRobot {
-            position: Point { x: 0, y: 0 },
+            position,
             direction: Direction::North,
-            whites: HashSet::new(),
+            whites,
             painted: HashSet::new(),
         }
     }
@@ -116,10 +122,10 @@ impl PaintingRobot {
 
     fn advance(&mut self) {
         match self.direction {
-            Direction::North => self.position.x += 1,
-            Direction::South => self.position.x -= 1,
-            Direction::East => self.position.y += 1,
-            Direction::West => self.position.y -= 1,
+            Direction::North => self.position.y -= 1,
+            Direction::South => self.position.y += 1,
+            Direction::East => self.position.x -= 1,
+            Direction::West => self.position.x += 1,
         }
     }
 
@@ -161,6 +167,22 @@ impl PaintingRobot {
         .run()
         .unwrap();
     }
+
+    pub fn draw(&self) -> String {
+        let min_x = self.whites.iter().map(|point| point.x).min().unwrap_or(0);
+        let max_x = self.whites.iter().map(|point| point.x).max().unwrap_or(0);
+        let min_y = self.whites.iter().map(|point| point.y).min().unwrap_or(0);
+        let max_y = self.whites.iter().map(|point| point.y).max().unwrap_or(0);
+        let width = (max_x - min_x + 1) as usize;
+        let height = (max_y - min_y + 1) as usize;
+        let mut data = vec![vec![' '; width]; height];
+        for point in &self.whites {
+            data[(point.y - min_y) as usize][(point.x - min_x) as usize] = '#';
+        }
+        data.into_iter()
+            .map(|line| line.into_iter().collect::<String>())
+            .join("\n")
+    }
 }
 
 #[cfg(test)]
@@ -176,7 +198,7 @@ mod tests {
 
     #[test]
     fn example1() {
-        let mut painter = PaintingRobot::new();
+        let mut painter = PaintingRobot::new(Color::Black);
         assert_eq!(painter.current_color(), Color::Black);
         painter.paint(Color::White);
         painter.go_left();
@@ -208,8 +230,31 @@ mod tests {
             .map(|x| x.parse())
             .collect::<Result<_, _>>()
             .unwrap();
-        let mut painter = PaintingRobot::new();
+        let mut painter = PaintingRobot::new(Color::Black);
         painter.execute(intcode);
         assert_eq!(painter.painted_count(), 1907);
+    }
+
+    #[test]
+    fn day_11_part_2() {
+        let intcode: Vec<isize> = include_str!("input")
+            .lines()
+            .next()
+            .unwrap()
+            .split(",")
+            .map(|x| x.parse())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let mut painter = PaintingRobot::new(Color::White);
+        painter.execute(intcode);
+        assert_eq!(
+            painter.draw(),
+            " ##  ###  #### #  # ####  ##  ####  ## \n\
+             #  # #  # #    # #     # #  # #    #  #\n\
+             #  # ###  ###  ##     #  #    ###  #   \n\
+             #### #  # #    # #   #   # ## #    # ##\n\
+             #  # #  # #    # #  #    #  # #    #  #\n\
+             #  # ###  #### #  # ####  ### #     ###"
+        );
     }
 }
