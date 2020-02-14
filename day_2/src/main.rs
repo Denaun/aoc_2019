@@ -24,7 +24,7 @@ fn main() {
     let intcode: Vec<usize> = matches
         .value_of("intcode")
         .unwrap()
-        .split(",")
+        .split(',')
         .map(|x| x.parse())
         .collect::<Result<_, _>>()
         .unwrap();

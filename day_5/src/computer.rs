@@ -281,6 +281,8 @@ impl TryFrom<u32> for Mode {
 
 #[cfg(test)]
 mod tests {
+    use log::info;
+
     pub fn find_noun_verb(mut intcode: Vec<isize>, result: isize) -> Option<(usize, usize)> {
         for noun in (0..intcode.len()).filter(|x| x % 4 != 0) {
             intcode[1] = noun as isize;

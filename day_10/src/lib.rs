@@ -72,10 +72,10 @@ impl<T: Copy + Integer + Signed> Point<T> {
 
     pub fn distance_from(&self, other: &Self) -> T {
         let angle = self.angle_with(other);
-        return match angle.quadrant {
+        (match angle.quadrant {
             Quadrant::BottomRight | Quadrant::TopLeft => abs(other.x - self.x),
             Quadrant::BottomLeft | Quadrant::TopRight => abs(other.y - self.y),
-        } / *angle.slope.denom();
+        } / *angle.slope.denom())
     }
 }
 

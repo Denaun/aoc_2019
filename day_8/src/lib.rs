@@ -6,10 +6,10 @@ pub enum Pixel {
 }
 
 impl Pixel {
-    pub fn superpose_to(&self, other: &Pixel) -> Pixel {
+    pub fn superpose_to(self, other: Pixel) -> Pixel {
         match self {
-            Pixel::Transparent => *other,
-            _ => *self,
+            Pixel::Transparent => other,
+            _ => self,
         }
     }
 }
@@ -97,7 +97,7 @@ impl Decode<VecLayer<Pixel>> for VecImage<Pixel> {
                     acc_row
                         .into_iter()
                         .zip(layer_row.iter())
-                        .map(|(acc_pixel, layer_pixel)| acc_pixel.superpose_to(layer_pixel))
+                        .map(|(acc_pixel, layer_pixel)| acc_pixel.superpose_to(*layer_pixel))
                         .collect()
                 })
                 .collect()

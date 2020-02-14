@@ -8,7 +8,7 @@ pub struct Computer {
 impl Computer {
     pub fn new(intcode: Vec<usize>) -> Computer {
         Computer {
-            intcode: intcode,
+            intcode,
             ip: 0,
         }
     }
