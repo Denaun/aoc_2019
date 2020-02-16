@@ -1,119 +1,123 @@
-use euclid::default::Point3D;
-use euclid::default::Vector3D;
+use gcd::Gcd;
 use num::Integer;
 use num::Signed;
-use std::cmp::Ordering;
 use std::iter::Sum;
+use std::ops::AddAssign;
 
-fn component_cmp<T>(lhs: &Point3D<T>, rhs: &Point3D<T>) -> Point3D<Ordering>
-where
-    T: Ord,
-{
-    Point3D::new(lhs.x.cmp(&rhs.x), lhs.y.cmp(&rhs.y), lhs.z.cmp(&rhs.z))
+trait Lcm {
+    fn lcm(self, other: Self) -> Self;
 }
-
-trait Map<T, U> {
-    type Output;
-
-    fn map<F: Fn(T) -> U>(self, f: F) -> Self::Output;
-}
-
-impl<T, U> Map<T, U> for Point3D<T> {
-    type Output = Point3D<U>;
-
-    fn map<F: Fn(T) -> U>(self, f: F) -> Self::Output {
-        Point3D::new(f(self.x), f(self.y), f(self.z))
-    }
-}
-
-trait Energy<T> {
-    fn energy(&self) -> T;
-}
-
-impl<T> Energy<T> for Point3D<T>
-where
-    T: Integer + Signed + Copy + Sum,
-{
-    fn energy(&self) -> T {
-        self.to_array().iter().copied().map(|v| v.abs()).sum()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Moon<T> {
-    pub position: Point3D<T>,
-    pub velocity: Vector3D<T>,
-}
-
-impl<T> Moon<T>
-where
-    T: Integer + Signed + Copy + Sum,
-{
-    pub fn total_energy(&self) -> T {
-        self.potential_energy() * self.kinetic_energy()
-    }
-
-    pub fn potential_energy(&self) -> T {
-        self.position.energy()
-    }
-
-    pub fn kinetic_energy(&self) -> T {
-        self.velocity.to_point().energy()
+impl<T: Gcd + Integer + Signed + Copy> Lcm for T {
+    fn lcm(self, other: Self) -> Self {
+        (self * other).abs() / self.gcd(other)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateSlice<T> {
+    pub positions: Vec<T>,
+    pub velocities: Vec<T>,
+}
+
+impl<T> StateSlice<T>
+where
+    T: Integer + Signed + AddAssign + Sum + Copy,
+{
+    pub fn step(&mut self) {
+        self.gravity_step();
+        self.velocity_step();
+    }
+
+    fn gravity_step(&mut self) {
+        for (velocity, position) in self.velocities.iter_mut().zip(self.positions.iter()) {
+            *velocity += self
+                .positions
+                .iter()
+                .map(|other| (*other - *position).signum())
+                .sum()
+        }
+    }
+
+    fn velocity_step(&mut self) {
+        for (position, velocity) in self.positions.iter_mut().zip(self.velocities.iter()) {
+            *position += *velocity;
+        }
+    }
+
+    pub fn find_period(&self) -> usize {
+        let mut tmp = self.clone();
+        for i in 1.. {
+            tmp.step();
+            if *self == tmp {
+                return i;
+            }
+        }
+        unreachable!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct State<T> {
+    pub x: StateSlice<T>,
+    pub y: StateSlice<T>,
+    pub z: StateSlice<T>,
+}
+
+impl<T> State<T>
+where
+    T: Integer + Signed + AddAssign + Sum + Copy,
+{
+    pub fn energy(&self) -> T {
+        let pot = self
+            .x
+            .positions
+            .iter()
+            .zip(self.y.positions.iter())
+            .zip(self.z.positions.iter())
+            .map(|((x, y), z)| x.abs() + y.abs() + z.abs());
+        let kin = self
+            .x
+            .velocities
+            .iter()
+            .zip(self.y.velocities.iter())
+            .zip(self.z.velocities.iter())
+            .map(|((x, y), z)| x.abs() + y.abs() + z.abs());
+        pot.zip(kin).map(|(p, k)| p * k).sum()
+    }
+
+    pub fn step(&mut self) {
+        self.x.step();
+        self.y.step();
+        self.z.step();
+    }
+}
+
 pub struct Simulator<T> {
-    pub moons: Vec<Moon<T>>,
+    state: State<T>,
 }
 
 impl<T> Simulator<T>
 where
-    T: Integer + Signed + Copy + Sum,
+    T: Integer + Signed + AddAssign + Sum + Copy,
 {
-    pub fn step(self) -> Self {
-        self.gravity_step().velocity_step()
+    pub fn new(state: State<T>) -> Self {
+        Simulator { state }
     }
 
-    fn gravity_step(&self) -> Self {
-        Self {
-            moons: self
-                .moons
-                .iter()
-                .map(|moon| Moon {
-                    position: moon.position,
-                    velocity: moon.velocity
-                        + self.moons.iter().fold(Vector3D::zero(), |sum, other| {
-                            sum + component_cmp(&moon.position, &other.position)
-                                .map(|o| match o {
-                                    Ordering::Equal => T::zero(),
-                                    Ordering::Greater => -T::one(),
-                                    Ordering::Less => T::one(),
-                                })
-                                .to_vector()
-                        }),
-                })
-                .collect(),
-        }
+    pub fn state(&self) -> &State<T> {
+        &self.state
     }
 
-    fn velocity_step(self) -> Self {
-        Self {
-            moons: self
-                .moons
-                .into_iter()
-                .map(|moon| Moon {
-                    position: moon.position + moon.velocity,
-                    velocity: moon.velocity,
-                })
-                .collect(),
-        }
+    pub fn step(&mut self) {
+        self.state.step();
     }
 
-    pub fn energy(&self) -> T {
-        self.moons
-            .iter()
-            .fold(T::zero(), |sum, moon| sum + moon.total_energy())
+    pub fn find_period(&self) -> usize {
+        self.state
+            .x
+            .find_period()
+            .lcm(&self.state.y.find_period())
+            .lcm(&self.state.z.find_period())
     }
 }
 
@@ -124,112 +128,115 @@ mod tests {
 
     #[test]
     fn example1() {
-        let mut sim = Simulator {
-            moons: vec![
-                Moon {
-                    position: Point3D::new(-1, 0, 2),
-                    velocity: Vector3D::zero(),
-                },
-                Moon {
-                    position: Point3D::new(2, -10, -7),
-                    velocity: Vector3D::zero(),
-                },
-                Moon {
-                    position: Point3D::new(4, -8, 8),
-                    velocity: Vector3D::zero(),
-                },
-                Moon {
-                    position: Point3D::new(3, 5, -1),
-                    velocity: Vector3D::zero(),
-                },
-            ],
-        };
+        let mut sim = Simulator::new(State {
+            x: StateSlice {
+                positions: vec![-1, 2, 4, 3],
+                velocities: vec![0; 4],
+            },
+            y: StateSlice {
+                positions: vec![0, -10, -8, 5],
+                velocities: vec![0; 4],
+            },
+            z: StateSlice {
+                positions: vec![2, -7, 8, -1],
+                velocities: vec![0; 4],
+            },
+        });
         // Step 1
-        sim = sim.step();
+        sim.step();
         assert_eq!(
-            sim,
-            Simulator {
-                moons: vec![
-                    Moon {
-                        position: Point3D::new(2, -1, 1),
-                        velocity: Vector3D::new(3, -1, -1),
-                    },
-                    Moon {
-                        position: Point3D::new(3, -7, -4),
-                        velocity: Vector3D::new(1, 3, 3),
-                    },
-                    Moon {
-                        position: Point3D::new(1, -7, 5),
-                        velocity: Vector3D::new(-3, 1, -3),
-                    },
-                    Moon {
-                        position: Point3D::new(2, 2, 0),
-                        velocity: Vector3D::new(-1, -3, 1),
-                    },
-                ],
+            sim.state(),
+            &State {
+                x: StateSlice {
+                    positions: vec![2, 3, 1, 2],
+                    velocities: vec![3, 1, -3, -1],
+                },
+                y: StateSlice {
+                    positions: vec![-1, -7, -7, 2],
+                    velocities: vec![-1, 3, 1, -3],
+                },
+                z: StateSlice {
+                    positions: vec![1, -4, 5, 0],
+                    velocities: vec![-1, 3, -3, 1],
+                },
             }
         );
         for _ in 0..9 {
-            sim = sim.step();
+            sim.step();
         }
-        assert_eq!(sim.energy(), 179);
+        assert_eq!(sim.state().energy(), 179);
+        let i = sim.find_period();
+        assert_eq!(i, 2772);
     }
 
     #[test]
     fn example2() {
-        let mut sim = Simulator {
-            moons: vec![
-                Moon {
-                    position: Point3D::new(-8, -10, 0),
-                    velocity: Vector3D::zero(),
-                },
-                Moon {
-                    position: Point3D::new(5, 5, 10),
-                    velocity: Vector3D::zero(),
-                },
-                Moon {
-                    position: Point3D::new(2, -7, 3),
-                    velocity: Vector3D::zero(),
-                },
-                Moon {
-                    position: Point3D::new(9, -8, -3),
-                    velocity: Vector3D::zero(),
-                },
-            ],
-        };
+        let mut sim = Simulator::new(State {
+            x: StateSlice {
+                positions: vec![-8, 5, 2, 9],
+                velocities: vec![0; 4],
+            },
+            y: StateSlice {
+                positions: vec![-10, 5, -7, -8],
+                velocities: vec![0; 4],
+            },
+            z: StateSlice {
+                positions: vec![0, 10, 3, -3],
+                velocities: vec![0; 4],
+            },
+        });
         for _ in 0..100 {
-            sim = sim.step();
+            sim.step();
         }
-        assert_eq!(sim.energy(), 1940);
+        assert_eq!(sim.state().energy(), 1940);
+        let i = sim.find_period();
+        assert_eq!(i, 4_686_774_924);
     }
 
-    fn read_input(data: &str) -> Simulator<i32> {
+    fn read_input(data: &str) -> State<i32> {
         let re = Regex::new(r"<x=((?:-)?\d+), y=((?:-)?\d+), z=((?:-)?\d+)>").unwrap();
-        Simulator {
-            moons: data
-                .lines()
-                .map(|line| {
-                    let caps = re.captures(line).unwrap();
-                    assert_eq!(caps.len(), 4);
-                    Moon {
-                        position: Point3D::new(
-                            caps[1].parse().unwrap(),
-                            caps[2].parse().unwrap(),
-                            caps[3].parse().unwrap(),
-                        ),
-                        velocity: Vector3D::zero(),
-                    }
-                })
-                .collect(),
+        let data: Vec<_> = data
+            .lines()
+            .map(|line| {
+                let caps = re.captures(line).unwrap();
+                assert_eq!(caps.len(), 4);
+                [
+                    caps[1].parse().unwrap(),
+                    caps[2].parse().unwrap(),
+                    caps[3].parse().unwrap(),
+                ]
+            })
+            .collect();
+        State {
+            x: StateSlice {
+                positions: data.iter().map(|line| line[0]).collect(),
+                velocities: vec![0; data.len()],
+            },
+            y: StateSlice {
+                positions: data.iter().map(|line| line[1]).collect(),
+                velocities: vec![0; data.len()],
+            },
+            z: StateSlice {
+                positions: data.iter().map(|line| line[2]).collect(),
+                velocities: vec![0; data.len()],
+            },
         }
     }
 
     #[test]
     fn day_12_part_1() {
-        let mut sim = read_input(include_str!("input"));
+        let mut sim = Simulator::new(read_input(include_str!("input")));
+        println!("{:?}", sim.state());
         for _ in 0..1000 {
-            sim = sim.step();
+            sim.step();
         }
-        assert_eq!(sim.energy(), 7202);
+        assert_eq!(sim.state().energy(), 7202);
+    }
+
+    #[test]
+    fn day_12_part_2() {
+        let sim = Simulator::new(read_input(include_str!("input")));
+        let i = sim.find_period();
+        assert_eq!(i, 537_881_600_740_876);
     }
 }
