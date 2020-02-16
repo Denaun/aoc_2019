@@ -1,17 +1,7 @@
-use gcd::Gcd;
 use num::Integer;
 use num::Signed;
 use std::iter::Sum;
 use std::ops::AddAssign;
-
-trait Lcm {
-    fn lcm(self, other: Self) -> Self;
-}
-impl<T: Gcd + Integer + Signed + Copy> Lcm for T {
-    fn lcm(self, other: Self) -> Self {
-        (self * other).abs() / self.gcd(other)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateSlice<T> {
