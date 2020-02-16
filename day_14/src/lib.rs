@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::hash::BuildHasher;
@@ -82,6 +83,43 @@ pub fn solve_for<S1: BuildHasher, S2: BuildHasher>(
         }
     }
     (result, leftovers)
+}
+
+pub fn optimize_ore_to_fuel<S: BuildHasher>(
+    reactions: &HashMap<Chemical, Reaction, S>,
+    ores: usize,
+) -> usize {
+    let get_ores = |fuel| {
+        let base = solve_for(reactions, &Chemical::Fuel, fuel, HashMap::new()).0;
+        assert_eq!(base.len(), 1);
+        assert!(base.contains_key(&Chemical::Ore));
+        base[&Chemical::Ore]
+    };
+    let mut lo = 1;
+    let mut hi = 1;
+    // First loop to find the high bound.
+    loop {
+        let used = get_ores(hi);
+        println!("{} => {}", hi, used);
+        match used.cmp(&ores) {
+            Ordering::Equal => return hi,
+            Ordering::Less => {
+                lo = hi;
+                hi *= 2;
+            }
+            Ordering::Greater => break,
+        }
+    }
+    while lo + 1 != hi {
+        let mid = (lo + hi + 1) / 2;
+        let used = get_ores(mid);
+        match used.cmp(&ores) {
+            Ordering::Equal => return mid,
+            Ordering::Less => lo = mid,
+            Ordering::Greater => hi = mid,
+        }
+    }
+    lo
 }
 
 #[cfg(test)]
@@ -172,6 +210,10 @@ mod tests {
             solve_for(&reactions, &Chemical::Fuel, 1, HashMap::new()).0,
             [(Chemical::Ore, 13312)].iter().cloned().collect()
         );
+        assert_eq!(
+            optimize_ore_to_fuel(&reactions, 1_000_000_000_000),
+            82_892_753
+        );
     }
 
     #[test]
@@ -193,6 +235,10 @@ mod tests {
         assert_eq!(
             solve_for(&reactions, &Chemical::Fuel, 1, HashMap::new()).0,
             [(Chemical::Ore, 180_697)].iter().cloned().collect()
+        );
+        assert_eq!(
+            optimize_ore_to_fuel(&reactions, 1_000_000_000_000),
+            5_586_022
         );
     }
 
@@ -221,6 +267,7 @@ mod tests {
             solve_for(&reactions, &Chemical::Fuel, 1, HashMap::new()).0,
             [(Chemical::Ore, 2_210_736)].iter().cloned().collect()
         );
+        assert_eq!(optimize_ore_to_fuel(&reactions, 1_000_000_000_000), 460_664);
     }
 
     #[test]
@@ -229,6 +276,10 @@ mod tests {
         assert_eq!(
             solve_for(&reactions, &Chemical::Fuel, 1, HashMap::new()).0,
             [(Chemical::Ore, 114_125)].iter().cloned().collect()
+        );
+        assert_eq!(
+            optimize_ore_to_fuel(&reactions, 1_000_000_000_000),
+            12_039_407
         );
     }
 }
