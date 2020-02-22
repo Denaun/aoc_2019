@@ -59,19 +59,28 @@ where
         }
     }
 
-    pub fn run(&mut self) -> Result<()> {
-        loop {
-            debug!("Instruction {}", self.ip);
-            let instr = Instruction::try_from(
-                usize::try_from(self.intcode[self.ip]).context(Address { address: self.ip })?,
-            )?;
-            if instr == Instruction::Stop {
-                return Ok(());
-            }
-            if self.execute(&instr)? {
-                self.ip += 1 + instr.operands();
-            }
+    /// Run a single step of the program.
+    ///
+    /// Returns `false` when the program stops (i.e.,
+    /// [`Instruction::Stop`](enum.Instruction.html#variant.Stop) is executed).
+    pub fn run_one(&mut self) -> Result<bool> {
+        debug!("Instruction {}", self.ip);
+        let instr = Instruction::try_from(
+            usize::try_from(self.intcode[self.ip]).context(Address { address: self.ip })?,
+        )?;
+        if instr == Instruction::Stop {
+            return Ok(false);
         }
+        if self.execute(&instr)? {
+            self.ip += 1 + instr.operands();
+        }
+        Ok(true)
+    }
+
+    /// Run the whole program.
+    pub fn run(&mut self) -> Result<()> {
+        while self.run_one()? {}
+        Ok(())
     }
 
     fn execute(&mut self, instr: &Instruction) -> Result<bool> {
