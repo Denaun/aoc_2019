@@ -119,12 +119,18 @@ impl Explorer {
     }
 
     fn find_path(from: &Target, to: &Target) -> Path {
-        from.1
-            .iter()
-            .cloned()
+        let mut from = from.1.iter().peekable();
+        let mut to = to.1.iter().peekable();
+        // Manual zip + skip_while as zip requires both iterators to have the
+        // same length. Also this avoids unzip, which would two vectors.
+        while from.peek() == to.peek() {
+            from.next();
+            to.next();
+        }
+        from.cloned()
             .map(Direction::opposite)
             .rev()
-            .chain(to.1.iter().cloned())
+            .chain(to.cloned())
             .rev() // The path will be applied by popping from the end.
             .collect()
     }
