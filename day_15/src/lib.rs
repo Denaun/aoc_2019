@@ -1,11 +1,13 @@
 use day_9::computer::Computer;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::hash::Hash;
 use std::slice::Iter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Coordinates(isize, isize);
+pub struct Coordinates(isize, isize);
 
 impl Coordinates {
     pub fn neighbor(self, dir: Direction) -> Self {
@@ -47,6 +49,12 @@ impl Direction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exploration {
+    InProgress,
+    Finished,
+}
+
 type Path = Vec<Direction>;
 
 #[derive(Debug)]
@@ -79,20 +87,24 @@ impl Explorer {
         self.dir_queue.last().unwrap()
     }
 
-    pub fn reached_wall(&mut self) {
+    pub fn notify_wall(&mut self) -> Exploration {
         assert_eq!(
             self.dir_queue.len(),
             1,
             "Shouldn't run into walls for known paths"
         );
         self.visited.insert(self.target.0);
-        let next_target = self.to_visit.pop_front().unwrap();
-        self.dir_queue = Self::find_path(&self.target, &next_target);
-        self.dir_queue.pop().unwrap(); // Never actually reached the current target.
-        self.target = next_target;
+        if let Some(next_target) = self.to_visit.pop_front() {
+            self.dir_queue = Self::find_path(&self.target, &next_target);
+            self.dir_queue.pop().unwrap(); // Never actually reached the current target.
+            self.target = next_target;
+            Exploration::InProgress
+        } else {
+            Exploration::Finished
+        }
     }
 
-    pub fn reached_space(&mut self) {
+    pub fn notify_space(&mut self) -> Exploration {
         self.dir_queue.pop().unwrap();
         if self.dir_queue.is_empty() {
             let pos = &self.target.0;
@@ -106,15 +118,19 @@ impl Explorer {
                     self.to_visit.push_back(Target(neighbor, path));
                 }
             }
-            let next_target = self.to_visit.pop_front().unwrap();
-            self.dir_queue = Self::find_path(&self.target, &next_target);
-            self.target = next_target;
+            if let Some(next_target) = self.to_visit.pop_front() {
+                self.dir_queue = Self::find_path(&self.target, &next_target);
+                self.target = next_target;
+                Exploration::InProgress
+            } else {
+                Exploration::Finished
+            }
+        } else {
+            Exploration::InProgress
         }
     }
 
-    pub fn reached_oxygen_system(&mut self) -> Path {
-        self.dir_queue.pop().unwrap();
-        assert!(self.dir_queue.is_empty(), "Already visited");
+    pub fn get_target_path(&self) -> Path {
         self.target.1.clone()
     }
 
@@ -142,24 +158,141 @@ impl Default for Explorer {
     }
 }
 
-pub fn run_explorer(intcode: Vec<isize>) -> Path {
-    let path = RefCell::new(None);
-    let explorer = RefCell::new(Explorer::new());
+pub fn find_oxygen_system(intcode: Vec<isize>) -> Path {
+    struct State {
+        explorer: Explorer,
+        path: Option<Path>,
+    }
+    let state = RefCell::new(State {
+        explorer: Explorer::new(),
+        path: None,
+    });
     let mut computer = Computer::new(
         intcode,
-        || *explorer.borrow().next_direction() as isize,
-        |v| match v {
-            0 => explorer.borrow_mut().reached_wall(),
-            1 => explorer.borrow_mut().reached_space(),
-            2 => *path.borrow_mut() = Some(explorer.borrow_mut().reached_oxygen_system()),
-            _ => panic!(),
+        || *state.borrow().explorer.next_direction() as isize,
+        |v| {
+            let mut state = state.borrow_mut();
+            match v {
+                0 => {
+                    let e = state.explorer.notify_wall();
+                    assert_eq!(e, Exploration::InProgress)
+                }
+                1 => {
+                    let e = state.explorer.notify_space();
+                    assert_eq!(e, Exploration::InProgress)
+                }
+                2 => state.path = Some(state.explorer.get_target_path()),
+                _ => panic!(),
+            }
         },
     );
-    while path.borrow().is_none() {
+    while state.borrow().path.is_none() {
         let ok = computer.run_one().unwrap();
         assert!(ok);
     }
-    path.into_inner().unwrap()
+    state.into_inner().path.unwrap()
+}
+
+type AdjList<T> = HashMap<T, HashSet<T>>;
+
+trait AdjInsert<T> {
+    fn adj_insert(&mut self, x: T, y: T);
+}
+impl<T> AdjInsert<T> for AdjList<T>
+where
+    T: Clone + Eq + Hash,
+{
+    fn adj_insert(&mut self, x: T, y: T) {
+        self.entry(x.clone()).or_default().insert(y.clone());
+        self.entry(y).or_default().insert(x);
+    }
+}
+
+pub fn build_map(intcode: Vec<isize>) -> (Coordinates, AdjList<Coordinates>) {
+    struct State {
+        pos: Coordinates,
+        dir: Option<Direction>,
+        stop: bool,
+        center: Option<Coordinates>,
+        map: AdjList<Coordinates>,
+        explorer: Explorer,
+    }
+    let state = RefCell::new(State {
+        pos: Coordinates(0, 0),
+        dir: None,
+        stop: false,
+        center: None,
+        map: AdjList::new(),
+        explorer: Explorer::new(),
+    });
+    let mut computer = Computer::new(
+        intcode,
+        || {
+            let mut state = state.borrow_mut();
+            let dir = *state.explorer.next_direction();
+            state.dir = Some(dir);
+            dir as isize
+        },
+        |v| {
+            let mut state = state.borrow_mut();
+            state.stop = match v {
+                0 => state.explorer.notify_wall(),
+                1 => {
+                    let new_pos = state.pos.neighbor(state.dir.unwrap());
+                    let old_pos = state.pos;
+                    state.map.adj_insert(old_pos, new_pos);
+                    state.pos = new_pos;
+                    state.explorer.notify_space()
+                }
+                2 => {
+                    let new_pos = state.pos.neighbor(state.dir.unwrap());
+                    let old_pos = state.pos;
+                    state.map.adj_insert(old_pos, new_pos);
+                    state.pos = new_pos;
+                    match state.center {
+                        None => state.center = Some(new_pos),
+                        Some(pos) if pos == new_pos => (),
+                        _ => panic!("More than one center"),
+                    }
+                    state.explorer.notify_space()
+                }
+                _ => panic!(),
+            } == Exploration::Finished;
+        },
+    );
+    while !state.borrow().stop {
+        let ok = computer.run_one().unwrap();
+        assert!(ok);
+    }
+    let state = state.into_inner();
+    (state.center.unwrap(), state.map)
+}
+
+pub fn longest_distance<T>(center: T, map: &AdjList<T>) -> usize
+where
+    T: Eq + Hash,
+{
+    let mut visited: HashSet<&T> = HashSet::new();
+    let mut to_visit: HashSet<&T> = [&center].iter().cloned().collect();
+    for turn in 0.. {
+        visited.extend(to_visit.iter());
+        to_visit = map
+            .iter()
+            .filter_map(|(c, adj)| {
+                if to_visit.contains(c) {
+                    Some(adj)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .filter(|c| !visited.contains(c))
+            .collect();
+        if to_visit.is_empty() {
+            return turn;
+        }
+    }
+    unreachable!()
 }
 
 #[cfg(test)]
@@ -178,7 +311,44 @@ mod tests {
 
     #[test]
     fn day_15_part_1() {
-        let path = run_explorer(read_intcode(include_str!("input")));
+        let path = find_oxygen_system(read_intcode(include_str!("input")));
         assert_eq!(path.len(), 270);
+    }
+
+    #[test]
+    fn empty_map() {
+        assert_eq!(longest_distance(0, &AdjList::new()), 0);
+    }
+
+    #[test]
+    fn single() {
+        let mut adj = AdjList::new();
+        adj.adj_insert(0, 1);
+        assert_eq!(longest_distance(0, &adj), 1);
+    }
+
+    #[test]
+    fn fork() {
+        let mut adj = AdjList::new();
+        adj.adj_insert(0, 1);
+        adj.adj_insert(1, 2);
+        adj.adj_insert(1, 3);
+        assert_eq!(longest_distance(0, &adj), 2);
+    }
+
+    #[test]
+    fn cycle() {
+        let mut adj = AdjList::new();
+        adj.adj_insert(0, 1);
+        adj.adj_insert(1, 2);
+        adj.adj_insert(2, 0);
+        assert_eq!(longest_distance(0, &adj), 1);
+    }
+
+    #[test]
+    fn day_15_part_2() {
+        let (center, map) = build_map(read_intcode(include_str!("input")));
+        assert_eq!(center, Coordinates(-18, -20));
+        assert_eq!(longest_distance(center, &map), 364);
     }
 }
