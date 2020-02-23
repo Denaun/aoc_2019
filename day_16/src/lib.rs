@@ -19,6 +19,29 @@ pub fn fft(input: &[i32], pattern: &[i32]) -> Vec<i32> {
         .collect()
 }
 
+/// Algorithm from [u/paul2718](https://www.reddit.com/r/adventofcode/comments/ebf5cy/2019_day_16_part_2_understanding_how_to_come_up/fb4bvw4/).
+pub fn decode(input: &[i32]) -> i32 {
+    const REPS: usize = 10_000;
+    const PHASES: usize = 100;
+
+    let start = input[0..7].iter().fold(0, |offset, d| offset * 10 + d) as usize;
+    let end = input.len() * REPS;
+    assert!(start > end / 2);
+    assert!(start < end);
+    let mut data = Vec::with_capacity(end - start);
+    for i in start..end {
+        data.push(input[i % input.len()]);
+    }
+
+    for _ in 0..PHASES {
+        for idx in (0..data.len() - 1).rev() {
+            data[idx] = (data[idx] + data[idx + 1]) % 10;
+        }
+    }
+
+    data[0..8].iter().fold(0, |offset, d| offset * 10 + d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +140,33 @@ mod tests {
         }
         input.truncate(8);
         assert_eq!(input, parse_input("68317988"));
+    }
+
+    #[test]
+    fn example_5() {
+        let input = parse_input("03036732577212944063491565474664");
+        let output = decode(&input);
+        assert_eq!(output, 84_462_026);
+    }
+
+    #[test]
+    fn example_6() {
+        let input = parse_input("02935109699940807407585447034323");
+        let output = decode(&input);
+        assert_eq!(output, 78_725_270);
+    }
+
+    #[test]
+    fn example_7() {
+        let input = parse_input("03081770884921959731165446850517");
+        let output = decode(&input);
+        assert_eq!(output, 53_553_731);
+    }
+
+    #[test]
+    fn day_16_part_2() {
+        let input = parse_input(include_str!("input").lines().take(1).next().unwrap());
+        let output = decode(&input);
+        assert_eq!(output, 53_850_800);
     }
 }
