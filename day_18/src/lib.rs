@@ -165,7 +165,7 @@ mod tests {
     fn part_1() {
         assert_eq!(
             shortest_path_length(&Graph::new(&str_to_mat(include_str!("input")))),
-            136
+            2796
         );
     }
 }
