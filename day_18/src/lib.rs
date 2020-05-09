@@ -8,9 +8,9 @@ pub type Coordinates = (usize, usize);
 pub type Cost = usize;
 pub type KeyId = char;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct State {
-    node: GraphNode,
+    nodes: Vec<GraphNode>,
     cost: Cost,
     keys: BTreeSet<KeyId>,
     path: Vec<GraphNode>,
@@ -31,9 +31,9 @@ impl PartialOrd for State {
 
 pub fn shortest_path_length(graph: &Graph) -> usize {
     let all_keys = graph.keys();
-    let mut visited = HashMap::<GraphNode, HashMap<BTreeSet<KeyId>, Cost>>::new();
+    let mut visited = HashMap::<Vec<GraphNode>, HashMap<BTreeSet<KeyId>, Cost>>::new();
     let mut to_visit: BinaryHeap<_> = [State {
-        node: GraphNode::Root,
+        nodes: graph.roots().into_iter().map(GraphNode::Root).collect(),
         cost: 0,
         keys: BTreeSet::new(),
         path: Vec::new(),
@@ -42,39 +42,44 @@ pub fn shortest_path_length(graph: &Graph) -> usize {
     .cloned()
     .collect();
     while let Some(State {
-        node,
+        nodes,
         cost,
         keys,
         path,
     }) = to_visit.pop()
     {
         if keys == all_keys {
+            println!("{:?}", path);
             return cost;
         }
         if visited
-            .get(&node)
+            .get(&nodes)
             .and_then(|c| c.get(&keys))
             .filter(|&&c| c <= cost)
             .is_some()
         {
             continue;
         }
-        for (node, step_cost) in graph.neighbors(&node, &keys) {
-            let cost = cost + step_cost;
-            let mut keys = keys.clone();
-            if let GraphNode::Key(k) = node {
-                keys.insert(k);
+        for (i, node) in nodes.iter().enumerate() {
+            for (neighbor, step_cost) in graph.neighbors(node, &keys) {
+                let mut nodes = nodes.clone();
+                nodes[i] = neighbor;
+                let cost = cost + step_cost;
+                let mut keys = keys.clone();
+                if let GraphNode::Key(k) = neighbor {
+                    keys.insert(k);
+                }
+                let mut path = path.clone();
+                path.push(neighbor);
+                to_visit.push(State {
+                    nodes,
+                    cost,
+                    keys,
+                    path,
+                });
             }
-            let mut path = path.clone();
-            path.push(node);
-            to_visit.push(State {
-                node,
-                cost,
-                keys,
-                path,
-            });
         }
-        visited.entry(node).or_default().insert(keys, cost);
+        visited.entry(nodes).or_default().insert(keys, cost);
     }
     unreachable!();
 }
@@ -86,6 +91,21 @@ mod tests {
 
     fn str_to_mat(data: &str) -> Vec<Vec<char>> {
         data.lines().map(|line| line.chars().collect()).collect()
+    }
+
+    fn make_part_2(mut data: Vec<Vec<char>>) -> Vec<Vec<char>> {
+        use crate::map::Map;
+        let (x, y) = data.find_root(None).unwrap();
+        data[y - 1][x - 1] = '0';
+        data[y - 1][x] = '#';
+        data[y - 1][x + 1] = '1';
+        data[y][x - 1] = '#';
+        data[y][x] = '#';
+        data[y][x + 1] = '#';
+        data[y + 1][x - 1] = '2';
+        data[y + 1][x] = '#';
+        data[y + 1][x + 1] = '3';
+        data
     }
 
     #[test]
@@ -165,6 +185,80 @@ mod tests {
     fn part_1() {
         assert_eq!(
             shortest_path_length(&Graph::new(&str_to_mat(include_str!("input")))),
+            2796
+        );
+    }
+
+    #[test]
+    fn example_6() {
+        assert_eq!(
+            shortest_path_length(&Graph::new(&make_part_2(str_to_mat(
+                "#######\n\
+                 #a.#Cd#\n\
+                 ##...##\n\
+                 ##.@.##\n\
+                 ##...##\n\
+                 #cB#Ab#\n\
+                 #######",
+            )))),
+            8
+        );
+    }
+
+    #[test]
+    fn example_7() {
+        assert_eq!(
+            shortest_path_length(&Graph::new(&make_part_2(str_to_mat(
+                "###############\n\
+                 #d.ABC.#.....a#\n\
+                 ######...######\n\
+                 ######.@.######\n\
+                 ######...######\n\
+                 #b.....#.....c#\n\
+                 ###############",
+            )))),
+            24
+        );
+    }
+
+    #[test]
+    fn example_8() {
+        assert_eq!(
+            shortest_path_length(&Graph::new(&make_part_2(str_to_mat(
+                "#############\n\
+                 #DcBa.#.GhKl#\n\
+                 #.###...#I###\n\
+                 #e#d#.@.#j#k#\n\
+                 ###C#...###J#\n\
+                 #fEbA.#.FgHi#\n\
+                 #############",
+            )))),
+            32
+        );
+    }
+
+    #[test]
+    fn example_9() {
+        assert_eq!(
+            shortest_path_length(&Graph::new(&make_part_2(str_to_mat(
+                "#############\n\
+                 #g#f.D#..h#l#\n\
+                 #F###e#E###.#\n\
+                 #dCba...BcIJ#\n\
+                 #####.@.#####\n\
+                 #nK.L...G...#\n\
+                 #M###N#H###.#\n\
+                 #o#m..#i#jk.#\n\
+                 #############",
+            )))),
+            72
+        );
+    }
+
+    #[test]
+    fn part_2() {
+        assert_eq!(
+            shortest_path_length(&Graph::new(&make_part_2(str_to_mat(include_str!("input"))))),
             2796
         );
     }

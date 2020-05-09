@@ -1,10 +1,10 @@
-use super::map::{Map, MapNode};
-use super::{Coordinates, Cost, KeyId};
+use crate::map::{Map, MapNode};
+use crate::{Coordinates, Cost, KeyId};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GraphNode {
-    Root,
+    Root(Option<u8>),
     Key(KeyId),
     Door(KeyId),
 }
@@ -39,10 +39,19 @@ impl Graph {
     pub fn new(map: &impl Map) -> Self {
         let mut adj_list = HashMap::<GraphNode, HashMap<GraphNode, usize>>::new();
         let mut visited = HashSet::new();
-        let mut to_visit = [(map.find_root(), GraphNode::Root)]
-            .iter()
-            .copied()
-            .collect::<VecDeque<_>>();
+        let mut to_visit: VecDeque<_> = map
+            .find_root(None)
+            .map(|root| [(root, GraphNode::Root(None))].iter().copied().collect())
+            .unwrap_or_else(|| {
+                (0..)
+                    .map(|i| {
+                        map.find_root(Some(i))
+                            .map(|root| (root, GraphNode::Root(Some(i))))
+                    })
+                    .take_while(|o| o.is_some())
+                    .flatten()
+                    .collect()
+            });
         while let Some((position, node)) = to_visit.pop_front() {
             for (position, cost) in graph_neighbors(map, &position) {
                 let neighbor = match map.node_at(&position).unwrap() {
@@ -90,6 +99,15 @@ impl Graph {
             })
             .collect()
     }
+    pub fn roots(&self) -> BTreeSet<Option<u8>> {
+        self.adj_list
+            .iter()
+            .filter_map(|(node, _)| match node {
+                GraphNode::Root(r) => Some(*r),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -112,7 +130,7 @@ mod tests {
             graph.adj_list,
             [
                 (
-                    GraphNode::Root,
+                    GraphNode::Root(None),
                     [(GraphNode::Door('a'), 2), (GraphNode::Key('a'), 2)]
                         .iter()
                         .copied()
@@ -120,11 +138,11 @@ mod tests {
                 ),
                 (
                     GraphNode::Key('a'),
-                    [(GraphNode::Root, 2)].iter().copied().collect()
+                    [(GraphNode::Root(None), 2)].iter().copied().collect()
                 ),
                 (
                     GraphNode::Door('a'),
-                    [(GraphNode::Key('b'), 2), (GraphNode::Root, 2)]
+                    [(GraphNode::Key('b'), 2), (GraphNode::Root(None), 2)]
                         .iter()
                         .copied()
                         .collect()
@@ -139,5 +157,88 @@ mod tests {
             .collect()
         );
         assert_eq!(graph.keys(), ['a', 'b'].iter().cloned().collect());
+    }
+
+    #[test]
+    fn example_6() {
+        let map = str_to_mat(
+            "#######\n\
+             #a.#Cd#\n\
+             ##0#1##\n\
+             #######\n\
+             ##2#3##\n\
+             #cB#Ab#\n\
+             #######",
+        );
+        let graph = Graph::new(&map);
+        assert_eq!(
+            graph.adj_list,
+            [
+                (
+                    GraphNode::Root(Some(0)),
+                    [(GraphNode::Key('a'), 2)].iter().copied().collect(),
+                ),
+                (
+                    GraphNode::Key('a'),
+                    [(GraphNode::Root(Some(0)), 2)].iter().copied().collect(),
+                ),
+                (
+                    GraphNode::Root(Some(1)),
+                    [(GraphNode::Door('c'), 1)].iter().copied().collect(),
+                ),
+                (
+                    GraphNode::Door('c'),
+                    [(GraphNode::Root(Some(1)), 1), (GraphNode::Key('d'), 1)]
+                        .iter()
+                        .copied()
+                        .collect(),
+                ),
+                (
+                    GraphNode::Key('d'),
+                    [(GraphNode::Door('c'), 1)].iter().copied().collect(),
+                ),
+                (
+                    GraphNode::Root(Some(2)),
+                    [(GraphNode::Door('b'), 1)].iter().copied().collect(),
+                ),
+                (
+                    GraphNode::Door('b'),
+                    [(GraphNode::Root(Some(2)), 1), (GraphNode::Key('c'), 1)]
+                        .iter()
+                        .copied()
+                        .collect()
+                ),
+                (
+                    GraphNode::Key('c'),
+                    [(GraphNode::Door('b'), 1)].iter().copied().collect(),
+                ),
+                (
+                    GraphNode::Root(Some(3)),
+                    [(GraphNode::Door('a'), 1)].iter().copied().collect()
+                ),
+                (
+                    GraphNode::Door('a'),
+                    [(GraphNode::Root(Some(3)), 1), (GraphNode::Key('b'), 1)]
+                        .iter()
+                        .copied()
+                        .collect()
+                ),
+                (
+                    GraphNode::Key('b'),
+                    [(GraphNode::Door('a'), 1)].iter().copied().collect()
+                )
+            ]
+            .iter()
+            .cloned()
+            .collect()
+        );
+        assert_eq!(graph.keys(), ['a', 'b', 'c', 'd'].iter().cloned().collect());
+        assert_eq!(
+            graph.roots(),
+            [Some(0), Some(1), Some(2), Some(3)]
+                .iter()
+                .cloned()
+                .collect()
+        );
     }
 }

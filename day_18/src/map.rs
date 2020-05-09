@@ -1,5 +1,5 @@
-use super::graph::GraphNode;
-use super::Coordinates;
+use crate::graph::GraphNode;
+use crate::Coordinates;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MapNode {
@@ -12,8 +12,8 @@ pub trait Map {
     fn neighbors(&self, position: &Coordinates) -> Vec<Coordinates>;
     fn find(&self, node: GraphNode) -> Option<Coordinates>;
 
-    fn find_root(&self) -> Coordinates {
-        self.find(GraphNode::Root).unwrap()
+    fn find_root(&self, index: Option<u8>) -> Option<Coordinates> {
+        self.find(GraphNode::Root(index))
     }
 }
 
@@ -23,9 +23,12 @@ impl Map for Vec<Vec<char>> {
         self.get(y)
             .and_then(|line| line.get(x))
             .and_then(|c| match c {
-                '@' => Some(MapNode::Filled(GraphNode::Root)),
+                '@' => Some(MapNode::Filled(GraphNode::Root(None))),
                 '.' => Some(MapNode::Empty),
                 '#' => None,
+                c @ '0'..='9' => Some(MapNode::Filled(GraphNode::Root(Some(
+                    c.to_digit(10).unwrap() as u8,
+                )))),
                 c @ 'a'..='z' => Some(MapNode::Filled(GraphNode::Key(*c))),
                 c @ 'A'..='Z' => Some(MapNode::Filled(GraphNode::Door(c.to_ascii_lowercase()))),
                 _ => unreachable!(),
@@ -42,7 +45,7 @@ impl Map for Vec<Vec<char>> {
 
     fn find(&self, node: GraphNode) -> Option<Coordinates> {
         let c = match node {
-            GraphNode::Root => '@',
+            GraphNode::Root(c) => c.map(|c| (c + '0' as u8) as char).unwrap_or('@'),
             GraphNode::Key(c) => c,
             GraphNode::Door(c) => c.to_ascii_uppercase(),
         };
